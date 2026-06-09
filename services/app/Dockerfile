@@ -1,10 +1,10 @@
+# syntax=docker/dockerfile:1.7
 FROM node:20-slim
 
 WORKDIR /app
 
-# The backend shells out to `docker` and talks to the host daemon through the
-# mounted /var/run/docker.sock. The socket alone is not enough; the image also
-# needs the Docker CLI and Compose plugin.
+# ── Layer 1: system deps (Docker CLI + Compose plugin) ──────────
+# Chỉ rebuild khi chính dòng RUN này đổi; độc lập với source code.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
     && install -m 0755 -d /etc/apt/keyrings \
@@ -15,10 +15,14 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
     && rm -rf /var/lib/apt/lists/*
 
-COPY package.json ./
-RUN npm install --production
-COPY src/ ./src/
-COPY public/ ./public/
+# ── Layer 2: node dependencies (chỉ đổi khi package*.json đổi) ──
+COPY package*.json ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm install --production --no-audit --no-fund
+
+# ── Layer 3: source code (đổi thường xuyên nhất → để cuối) ──────
+COPY src ./src
+COPY public ./public
 
 EXPOSE 3000
 

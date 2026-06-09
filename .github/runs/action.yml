@@ -29,7 +29,50 @@ runs:
       shell: bash
       run: dotenvrtdb -e .env -- node docker-compose/scripts/validate-env.js
 
+    # ── Step 4.1 (NEW): Read PROJECT_NAME để tag image khớp compose ──
+    - name: Resolve PROJECT_NAME from .env
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        PN=$(grep -E '^PROJECT_NAME=' .env | head -1 | cut -d= -f2-)
+        PN=${PN//\"/}
+        PN=${PN//\'/}
+        echo "PROJECT_NAME=${PN:-myapp}" >> "$GITHUB_ENV"
+
+    # ── Step 4.2 (NEW): Set up Docker Buildx (cần cho cache type=gha) ──
+    - name: Set up Docker Buildx
+      if: runner.os == 'Linux'
+      uses: docker/setup-buildx-action@v3
+
+    # ── Step 4.3 (NEW): Build app với GitHub Actions cache ─────
+    - name: Build app image (gha cache)
+      if: runner.os == 'Linux'
+      uses: docker/build-push-action@v6
+      with:
+        context: services/app
+        file: services/app/Dockerfile
+        load: true
+        provenance: false
+        tags: $ env.PROJECT_NAME -app:local
+        cache-from: type=gha,scope=app
+        cache-to: type=gha,scope=app,mode=max
+
+    # ── Step 4.4 (NEW): Build agy-dev với GitHub Actions cache ─
+    - name: Build agy-dev image (gha cache)
+      if: runner.os == 'Linux'
+      uses: docker/build-push-action@v6
+      with:
+        context: services/agy-dev
+        file: services/agy-dev/Dockerfile
+        load: true
+        provenance: false
+        tags: $ env.PROJECT_NAME -agy-dev:local
+        cache-from: type=gha,scope=agy-dev
+        cache-to: type=gha,scope=agy-dev,mode=max
+
     # ── Step 5: Deploy via dc.sh ──────────────────────────────
+    # app & agy-dev đã được build sẵn (tag khớp compose) nên bước này
+    # chỉ build các service còn lại; app/agy-dev hit cache → rất nhanh.
     - name: Build & start services (Linux)
       if: runner.os == 'Linux'
       shell: bash
@@ -44,17 +87,18 @@ runs:
         wsl -d Ubuntu -- bash -c "cd '$wsl' && bash docker-compose/scripts/dc.sh up -d --build --remove-orphans"
 
     # ── Step 6: Cleanup + keepalive ───────────────────────────
-    - name: Clean up unused images (Linux)
+    # KHÔNG prune toàn bộ (tránh xóa layer cache hữu ích). Chỉ dọn image cũ > 72h.
+    - name: Clean up old images (Linux)
       if: runner.os == 'Linux'
       shell: bash
-      run: docker image prune -f
+      run: docker image prune -f --filter "until=72h"
 
-    - name: Clean up unused images (Windows/WSL2)
+    - name: Clean up old images (Windows/WSL2)
       if: runner.os == 'Windows'
       shell: pwsh
       run: |
         $wsl = $env:WSL_WORKSPACE
-        wsl -d Ubuntu -- bash -c "cd '$wsl' && sudo docker image prune -f"
+        wsl -d Ubuntu -- bash -c "cd '$wsl' && sudo docker image prune -f --filter 'until=72h'"
 
     - name: dotenvrtdb runner keepalive
       shell: bash
