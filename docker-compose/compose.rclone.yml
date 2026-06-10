@@ -140,7 +140,7 @@ services:
     volumes:
       - ./services/rclone/restore.sh:/scripts/restore.sh:ro
       - ./services/rclone/lib.sh:/scripts/lib.sh:ro
-      - rclone_config:/config/rclone:ro
+      - rclone_config:/config/rclone
       - ${DOCKER_VOLUMES_ROOT:-./.docker-volumes}:/data
     networks: [app_net]
     restart: "no"
@@ -161,7 +161,7 @@ services:
       # sync.sh gọi restore.sh cho phần restore nền → mount luôn.
       - ./services/rclone/restore.sh:/scripts/restore.sh:ro
       - ./services/rclone/lib.sh:/scripts/lib.sh:ro
-      - rclone_config:/config/rclone:ro
+      - rclone_config:/config/rclone
       - ${DOCKER_VOLUMES_ROOT:-./.docker-volumes}:/data
     networks: [app_net]
     restart: unless-stopped
