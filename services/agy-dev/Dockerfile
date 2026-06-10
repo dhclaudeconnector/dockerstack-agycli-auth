@@ -25,7 +25,7 @@ RUN apt-get update \
 ARG AGY_INSTALL_URL="https://antigravity.google/cli/install.sh"
 # Bump giá trị này (qua .env hoặc --build-arg) để force tải agy version mới nhất
 ARG AGY_CACHE_BUST="2026-06-10"
-RUN set -eux; \
+RUN set -eu; \
   echo "==> [agy-install] cache bust: ${AGY_CACHE_BUST}"; \
   export PATH="/root/.local/bin:/usr/local/bin:${PATH}"; \
   downloaded=0; \
@@ -39,22 +39,19 @@ RUN set -eux; \
   sleep 3; \
   done; \
   if [ "${downloaded}" != "1" ]; then \
-  echo "❌ [agy-install] Tải install.sh thất bại sau 3 lần thử." >&2; \
+  echo "[agy-install] FAILED: Tai install.sh that bai sau 3 lan thu." >&2; \
   exit 1; \
   fi; \
-  # install.sh có thể exit non-zero do warning PATH dù cài thành công
-  # → dùng || true, verify binary bên dưới mới là nguồn sự thật
   bash /tmp/agy-install.sh || true; \
   rm -f /tmp/agy-install.sh; \
-  # ── Verify binary thật sự tồn tại & chạy được (fail-loud) ──
   if ! command -v agy >/dev/null 2>&1; then \
-  echo "❌ [agy-install] install.sh chạy xong nhưng KHÔNG tìm thấy binary 'agy' trong PATH." >&2; \
-  echo "   PATH=${PATH}" >&2; \
-  echo "   Liệt kê các vị trí thường gặp:" >&2; \
+  echo "[agy-install] FAILED: install.sh chay xong nhung KHONG tim thay binary agy trong PATH." >&2; \
+  echo "  PATH=${PATH}" >&2; \
   ls -la /usr/local/bin /root/.local/bin 2>/dev/null || true; \
   exit 1; \
   fi; \
-  echo "✅ [agy-install] agy resolved at: $(command -v agy)"
+  AGY_VERSION=$(agy --version 2>/dev/null || echo "unknown"); \
+  echo "==> [agy-install] OK: agy ${AGY_VERSION} at $(command -v agy)"
 
 # ── Layer 3: wrapper script (đổi khi exec-wrapper.sh đổi) ───────
 COPY exec-wrapper.sh /exec-wrapper.sh
