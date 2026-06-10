@@ -99,6 +99,8 @@ services:
     build:
       context: ./services/agy-dev
       dockerfile: Dockerfile
+      args:
+        AGYCLI_CACHE_BUILD: "${AGYCLI_CACHE_BUILD:-2026-06-10}"
     volumes:
       - ${DOCKER_VOLUMES_ROOT:-./.docker-volumes}/agy-dev/gemini:/root/.gemini
     tty: true

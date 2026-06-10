@@ -3,8 +3,8 @@ FROM node:20-slim
 
 # ── Layer 1: minimal system deps ────────────────────────────────
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl ca-certificates bash expect \
-    && rm -rf /var/lib/apt/lists/*
+  && apt-get install -y --no-install-recommends curl ca-certificates bash expect \
+  && rm -rf /var/lib/apt/lists/*
 
 # ── Layer 2: Antigravity CLI (agy) — layer phụ thuộc network ─────
 # NOTE: install.sh sets up `agy` binary at /usr/local/bin/agy (hoặc
@@ -20,33 +20,36 @@ RUN apt-get update \
 #    tại build-time. Cài hỏng → build FAIL RÕ RÀNG (không tạo image lỗi ngầm,
 #    không đầu độc cache). Pin version qua AGY_INSTALL_URL nếu cần ổn định.
 ARG AGY_INSTALL_URL="https://antigravity.google/cli/install.sh"
+# Bump AGYCLI_CACHE_BUILD (qua .env hoặc --build-arg) để force tải agy version mới nhất
+ARG AGYCLI_CACHE_BUILD="2026-06-10"
 RUN set -eux; \
-    installed=0; \
-    for attempt in 1 2 3; do \
-      echo "==> [agy-install] attempt ${attempt}/3 from ${AGY_INSTALL_URL}"; \
-      if curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 "${AGY_INSTALL_URL}" -o /tmp/agy-install.sh \
-         && bash /tmp/agy-install.sh; then \
-        installed=1; \
-        break; \
-      fi; \
-      echo "==> [agy-install] attempt ${attempt} failed, retrying..." >&2; \
-      sleep 3; \
-    done; \
-    rm -f /tmp/agy-install.sh; \
-    if [ "${installed}" != "1" ]; then \
-      echo "❌ [agy-install] Tải/chạy install.sh thất bại sau 3 lần thử." >&2; \
-      exit 1; \
-    fi; \
-    # ── Verify binary thật sự tồn tại & chạy được (fail-loud) ──
-    export PATH="/root/.local/bin:/usr/local/bin:${PATH}"; \
-    if ! command -v agy >/dev/null 2>&1; then \
-      echo "❌ [agy-install] install.sh chạy xong nhưng KHÔNG tìm thấy binary 'agy' trong PATH." >&2; \
-      echo "   PATH=${PATH}" >&2; \
-      echo "   Liệt kê các vị trí thường gặp:" >&2; \
-      ls -la /usr/local/bin /root/.local/bin 2>/dev/null || true; \
-      exit 1; \
-    fi; \
-    echo "✅ [agy-install] agy resolved at: $(command -v agy)"
+  echo "==> [agy-install] cache bust: ${AGYCLI_CACHE_BUILD}"; \
+  installed=0; \
+  for attempt in 1 2 3; do \
+  echo "==> [agy-install] attempt ${attempt}/3 from ${AGY_INSTALL_URL}"; \
+  if curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 "${AGY_INSTALL_URL}" -o /tmp/agy-install.sh \
+  && bash /tmp/agy-install.sh; then \
+  installed=1; \
+  break; \
+  fi; \
+  echo "==> [agy-install] attempt ${attempt} failed, retrying..." >&2; \
+  sleep 3; \
+  done; \
+  rm -f /tmp/agy-install.sh; \
+  if [ "${installed}" != "1" ]; then \
+  echo "❌ [agy-install] Tải/chạy install.sh thất bại sau 3 lần thử." >&2; \
+  exit 1; \
+  fi; \
+  # ── Verify binary thật sự tồn tại & chạy được (fail-loud) ──
+  export PATH="/root/.local/bin:/usr/local/bin:${PATH}"; \
+  if ! command -v agy >/dev/null 2>&1; then \
+  echo "❌ [agy-install] install.sh chạy xong nhưng KHÔNG tìm thấy binary 'agy' trong PATH." >&2; \
+  echo "   PATH=${PATH}" >&2; \
+  echo "   Liệt kê các vị trí thường gặp:" >&2; \
+  ls -la /usr/local/bin /root/.local/bin 2>/dev/null || true; \
+  exit 1; \
+  fi; \
+  echo "✅ [agy-install] agy resolved at: $(command -v agy)"
 
 # ── Layer 3: wrapper script (đổi khi exec-wrapper.sh đổi) ───────
 COPY exec-wrapper.sh /exec-wrapper.sh
