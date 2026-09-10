@@ -201,6 +201,17 @@ function listSessions() {
   }));
 }
 
+/**
+ * Hủy toàn bộ phiên đang theo dõi (dùng cho force-reset khi user muốn
+ * làm lại từ đầu mà không còn sessionId cũ). Kill child process từng
+ * phiên rồi destroy như destroySession.
+ */
+function destroyAllSessions({ reason } = {}) {
+  const ids = Array.from(sessions.keys());
+  for (const id of ids) destroySession(id, { reason });
+  return ids.length;
+}
+
 module.exports = {
   SESSION_TIMEOUT_MS,
   VERIFICATION_SESSION_TIMEOUT_MS,
@@ -214,5 +225,6 @@ module.exports = {
   attachSSE,
   detachSSE,
   destroySession,
+  destroyAllSessions,
   listSessions,
 };

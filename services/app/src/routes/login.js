@@ -396,7 +396,19 @@ router.post('/start', async (req, res) => {
   }
   if (sessions.getSession(sessionId)) return res.status(409).json({ error: 'Session already exists' });
 
-  await docker.acquireMutex(sessionId);
+  // Chống treo vô hạn khi phiên cũ bị bỏ dở (reload tab, cancel giữa chừng)
+  // mà vẫn giữ mutex: chờ tối đa ~15s rồi trả 409 busy để UI đề xuất dọn dẹp.
+  const mutexWaitMs = parseInt(process.env.AGY_MUTEX_WAIT_TIMEOUT_MS || '15000', 10);
+  const granted = await docker.acquireMutex(sessionId, { timeoutMs: mutexWaitMs });
+  if (!granted) {
+    const mutex = docker.getMutexState();
+    return res.status(409).json({
+      error: 'Container đang bận — một phiên login khác vẫn giữ. Hãy bấm “Dọn dẹp & thử lại” để hủy phiên kẹt và chạy lại từ đầu.',
+      busy: true,
+      holder: mutex.holder || null,
+      queued: mutex.queued,
+    });
+  }
 
   try {
     await docker.ensureContainerRunning();
@@ -639,6 +651,58 @@ router.post('/reset', async (req, res) => {
   docker.releaseMutex(sessionId);
   sessions.destroySession(sessionId, { reason: 'reset' });
   return res.json({ success: true });
+});
+
+// ─── GET /api/login/session/:sessionId ───────────────────────────────────────
+// Kiểm tra phiên còn sống không — để frontend reattach SSE sau khi reload tab.
+
+router.get('/session/:sessionId', (req, res) => {
+  const { sessionId } = req.params;
+  if (!isValidSessionId(sessionId)) return res.status(400).json({ error: 'Invalid sessionId' });
+  const session = sessions.getSession(sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  return res.json({ success: true, status: session.status, email: session.email });
+});
+
+// ─── GET /api/login/status ───────────────────────────────────────────────────
+// Trạng thái bận của container — để UI báo "đang bận" thay vì treo.
+
+router.get('/status', (_req, res) => {
+  const mutex = docker.getMutexState();
+  return res.json({
+    success: true,
+    busy: !!mutex.holder,
+    holder: mutex.holder || null,
+    queued: mutex.queued,
+    sessions: sessions.listSessions(),
+  });
+});
+
+// ─── POST /api/login/force-reset ─────────────────────────────────────────────
+// Dọn sạch MỌI phiên (kể cả khi đã mất sessionId cũ: reload tab, bỏ qua URL,
+// cancel giữa chừng): kill child, xóa FIFO, reset credential, kill driver sót
+// trong container, nhả mutex. Xong là chạy lại flow từ đầu được ngay.
+
+router.post('/force-reset', async (req, res) => {
+  const { sessionId } = req.body || {};
+
+  const tracked = sessions.listSessions();
+  for (const item of tracked) {
+    const full = sessions.getSession(item.sessionId);
+    if (full && full.childProcess) {
+      try { full.childProcess.kill('SIGKILL'); } catch (_) {}
+    }
+    if (full) {
+      await docker.cleanupFifo(docker.CONFIG.containerName, full.fifoPath).catch(() => {});
+    }
+  }
+  sessions.destroyAllSessions({ reason: 'force_reset' });
+  await docker.resetCredential(docker.CONFIG.containerName).catch(() => {});
+  await docker.killStrayAgy(docker.CONFIG.containerName);
+  docker.resetMutex();
+
+  log.ok(`Force reset by ${sessionId || 'unknown'}: cleared ${tracked.length} session(s).`);
+  return res.json({ success: true, cleared: tracked.length });
 });
 
 module.exports = router;

@@ -72,6 +72,9 @@ const dom = {
   btnPasteConfirm: $("btn-paste-confirm"),
   btnLoginAnother: $("btn-login-another"),
   btnTryAgain: $("btn-try-again"),
+  btnForceRetry: $("btn-force-retry"),
+  btnCancelLogin: $("btn-cancel-login"),
+  btnCancelVerify: $("btn-cancel-verify"),
   btnResetSession: $("btn-reset-session"),
   btnRefreshTokens: $("btn-refresh-tokens"),
   btnExportExcel: $("btn-export-excel"),
@@ -224,6 +227,7 @@ function renderQrCode(container, url, size = 180) {
         height: size,
         correctLevel: QRCode.CorrectLevel.L,
       });
+      console.info("[QR] rendered via qrcodejs, len=" + value.length);
       return;
     }
   } catch (err) {
@@ -235,8 +239,12 @@ function renderQrCode(container, url, size = 180) {
   img.width = size;
   img.height = size;
   img.loading = "lazy";
+  img.onerror = () => {
+    container.innerHTML = '<span class="text-muted" style="font-size:0.75rem">Không tạo được QR — hãy mở link bên trên.</span>';
+  };
   img.src = "https://api.qrserver.com/v1/create-qr-code/?size=" + size + "x" + size + "&data=" + encodeURIComponent(value);
   container.appendChild(img);
+  console.info("[QR] fallback image used (qrcodejs unavailable)");
 }
 
 function clearQrCode(container) {
@@ -282,6 +290,40 @@ function downloadQrCode(container, filename) {
 
 function setSidebarStatus(text) {
   dom.sidebarStatusText.textContent = text;
+}
+
+// ─── Persist session để reattach sau reload ────────────────────────────────
+// Reload tab giữa chừng làm mất sessionId → phiên cũ mồ côi, giữ mutex tới
+// 10 phút khiến lần chạy sau treo ở "Starting session…". Lưu sessionId vào
+// sessionStorage để reload xong tự nối lại SSE (backend replay đủ status/URL).
+
+const SESSION_STORAGE_KEY = "agy-auth-session";
+
+function saveSessionToStorage() {
+  try {
+    if (state.sessionId) {
+      sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
+        sessionId: state.sessionId,
+        email: state.email,
+      }));
+    }
+  } catch (_) {}
+}
+
+function readSessionFromStorage() {
+  try {
+    const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.sessionId === "string" && /^[A-Za-z0-9_-]{8,128}$/.test(parsed.sessionId)) {
+      return parsed;
+    }
+  } catch (_) {}
+  return null;
+}
+
+function clearSessionStorage() {
+  try { sessionStorage.removeItem(SESSION_STORAGE_KEY); } catch (_) {}
 }
 
 function setLoginLogBadge(text, variant = "info") {
@@ -513,10 +555,22 @@ function handleSSE(data) {
       showError(data.message || "Unknown error");
       closeSSE();
       break;
-    case "closed":
-      toast("Session closed: " + (data.reason || ""), "info");
+    case "closed": {
+      const reason = data.reason || "";
       closeSSE();
+      if (reason === "verify_restart" || reason === "success") {
+        toast("Session closed: " + reason, "info");
+        break;
+      }
+      // Phiên bị hủy/timeout phía server trong lúc user còn ở màn hình
+      // authorize → đưa về màn hình lỗi để có nút Try Again / Dọn dẹp & thử lại.
+      if (state.screen === 2 && state.eligibilityStatus !== "verified") {
+        showError("Phiên login đã kết thúc (" + (reason || "closed") + "). Hãy thử lại từ đầu — code cũ/PKCE cũ không dùng lại được.");
+      } else {
+        toast("Session closed: " + reason, "info");
+      }
       break;
+    }
   }
 }
 
@@ -652,6 +706,7 @@ function onEligibilityResult(data) {
 
 function onTokenSaved(data) {
   showScreen(3);
+  clearSessionStorage();
   dom.successEmail.textContent = data.email || state.email || "—";
   dom.successKey.textContent = data.key || "—";
   dom.successTime.textContent = formatTimestamp(data.savedAt);
@@ -664,12 +719,14 @@ function onTokenSaved(data) {
   setSidebarStatus("Verified & token saved!");
 }
 
-function showError(message) {
+function showError(message, options = {}) {
   showScreen(0);
   dom.errorMessage.textContent = message;
   setBadge(dom.sessionBadge, "Error", "danger");
   setSidebarStatus("Error");
-  toast(message, "danger");
+  // Chỉ hiện nút "Dọn dẹp phiên kẹt & thử lại" khi lỗi do container bận.
+  if (dom.btnForceRetry) dom.btnForceRetry.classList.toggle("hidden", !options.forceRetry);
+  if (!options.silent) toast(message, "danger");
 }
 
 // ─── API calls ───────────────────────────────────────────────────────────────
@@ -706,11 +763,13 @@ async function apiStartLogin(emailOverride = "") {
     const json = await res.json();
 
     if (!res.ok || !json.success) {
-      showError(json.error || `HTTP ${res.status}`);
+      const isBusy = res.status === 409 && json && json.busy;
+      showError(json.error || `HTTP ${res.status}`, { forceRetry: !!isBusy });
       dom.btnStart.disabled = false;
       return;
     }
 
+    saveSessionToStorage();
     toast("Session started", "success");
     connectSSE(state.sessionId);
   } catch (err) {
@@ -786,7 +845,8 @@ async function apiCheckVerification() {
 
     if (json.needsRestart) {
       toast("Verification requires re-authentication. Starting new login flow…", "info");
-      state.sse = null;
+      closeSSE();
+      clearSessionStorage();
       state.sessionId = null;
       await apiStartLogin(state.email);
       return;
@@ -803,6 +863,7 @@ async function apiCheckVerification() {
 
 async function apiResetSession(options = {}) {
   const { silent = false, keepEmail = false } = options;
+  clearSessionStorage();
   if (!state.sessionId) {
     resetUI({ keepEmail });
     return;
@@ -816,17 +877,60 @@ async function apiResetSession(options = {}) {
     });
   } catch (_) {}
 
-  if (state.sse) {
-    state.sse.close();
-    state.sse = null;
-  }
+  closeSSE();
   resetUI({ keepEmail });
   if (!silent) toast("Session reset", "info");
+}
+
+// Hủy phiên hiện tại (nút "Hủy / Làm lại từ đầu" ở màn hình authorize).
+// Khác reset thường: luôn dọn cả driver agy sót trong container để PKCE/
+// credential cũ không kẹt, chạy lại flow mới được ngay.
+async function apiCancelLogin() {
+  const email = state.email || dom.inputEmail.value;
+  closeSSE();
+  try {
+    await fetch("/api/login/force-reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId: state.sessionId }),
+    });
+  } catch (_) {}
+  clearSessionStorage();
+  resetUI({ keepEmail: true });
+  if (email) dom.inputEmail.value = email;
+  toast("Đã hủy phiên cũ — có thể Start Login lại từ đầu", "info");
+}
+
+// Dọn sạch mọi phiên kẹt rồi start lại (dùng khi /start trả 409 busy).
+async function apiForceResetAndRetry() {
+  const email = (dom.inputEmail.value || state.email || "").trim();
+  if (dom.btnForceRetry) dom.btnForceRetry.disabled = true;
+  try {
+    const res = await fetch("/api/login/force-reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId: state.sessionId }),
+    });
+    const json = await res.json().catch(() => ({}));
+    toast(`Đã dọn ${json.cleared ?? "?"} phiên kẹt — đang start lại…`, "info");
+  } catch (err) {
+    toast("Force reset failed: " + err.message, "danger");
+    if (dom.btnForceRetry) dom.btnForceRetry.disabled = false;
+    return;
+  }
+  closeSSE();
+  clearSessionStorage();
+  resetUI({ keepEmail: true });
+  if (email) dom.inputEmail.value = email;
+  if (dom.btnForceRetry) dom.btnForceRetry.disabled = false;
+  await apiStartLogin(email);
 }
 
 function resetUI(options = {}) {
   const { keepEmail = false } = options;
   const currentEmail = dom.inputEmail.value;
+  clearSessionStorage();
+  if (dom.btnForceRetry) dom.btnForceRetry.classList.add("hidden");
   state.sessionId = null;
   state.authUrl = null;
   state.verifyUrl = null;
@@ -1067,6 +1171,9 @@ if (dom.btnDownloadVerifyQr) dom.btnDownloadVerifyQr.addEventListener("click", (
   downloadQrCode(dom.verifyQrCode, "agy-verify-url-qr.png");
 });
 dom.btnCheckVerification.addEventListener("click", apiCheckVerification);
+if (dom.btnCancelLogin) dom.btnCancelLogin.addEventListener("click", apiCancelLogin);
+if (dom.btnCancelVerify) dom.btnCancelVerify.addEventListener("click", apiCancelLogin);
+if (dom.btnForceRetry) dom.btnForceRetry.addEventListener("click", apiForceResetAndRetry);
 dom.btnLoginAnother.addEventListener("click", resetUI);
 dom.btnTryAgain.addEventListener("click", () => {
   apiResetSession();
@@ -1138,6 +1245,29 @@ try {
 
 showScreen(1);
 showPage("login");
+
+// Reattach phiên còn sống sau khi reload tab: backend replay đủ
+// status + auth_url + verify_url qua SSE nên QR hiện lại đầy đủ.
+(async function tryReattachSession() {
+  const stored = readSessionFromStorage();
+  if (!stored) return;
+  try {
+    const res = await fetch(`/api/login/session/${encodeURIComponent(stored.sessionId)}`);
+    if (!res.ok) { clearSessionStorage(); return; }
+    const json = await res.json();
+    if (!json.success || json.status === "success") { clearSessionStorage(); return; }
+    state.sessionId = stored.sessionId;
+    state.email = stored.email || json.email || null;
+    if (state.email) dom.inputEmail.value = state.email;
+    resetLoginLogState();
+    setLoginLogBadge("Reconnecting", "info");
+    dom.loginLogPanel.classList.remove("hidden");
+    setBadge(dom.sessionBadge, "Reconnecting…", "info");
+    setSidebarStatus("Reconnecting to previous session…");
+    toast("Đang nối lại phiên login trước khi reload…", "info");
+    connectSSE(state.sessionId);
+  } catch (_) { clearSessionStorage(); }
+})();
 
 // ─── Health probe ────────────────────────────────────────────────────────────
 

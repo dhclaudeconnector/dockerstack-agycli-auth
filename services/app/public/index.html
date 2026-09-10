@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=2" />
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   </head>
   <body>
@@ -184,6 +184,10 @@
                 </button>
               </div>
 
+              <div class="flex gap-3 mt-4">
+                <button class="btn-light" id="btn-cancel-login" type="button" style="flex: 1; justify-content: center">Hủy / Làm lại từ đầu</button>
+              </div>
+
               <div class="flex items-center gap-3 mt-4 hidden" id="spinner-code">
                 <div class="spinner"></div>
                 <span class="text-muted" id="spinner-code-text">Waiting for credential and AGY eligibility check…</span>
@@ -236,6 +240,7 @@
                     </svg>
                     <span id="check-verification-label">I verified — Check Again</span>
                   </button>
+                  <button class="btn-light" id="btn-cancel-verify" type="button">Hủy / Làm lại</button>
                 </div>
 
                 <div class="flex items-center gap-3 mt-4 hidden" id="spinner-verify">
@@ -296,6 +301,7 @@
               </div>
               <button class="btn-primary" id="btn-try-again">Try Again</button>
               <button class="btn-light mt-4 ml-4" id="btn-reset-session">Reset Session</button>
+              <button class="btn-secondary mt-4 hidden" id="btn-force-retry">Dọn dẹp phiên kẹt & thử lại</button>
             </div>
           </div>
 
@@ -466,7 +472,7 @@
     <!-- Toast container -->
     <div class="toast-container" id="toast-container"></div>
 
-    <script src="qrcode.min.js"></script>
-    <script src="app.js"></script>
+    <script src="qrcode.min.js?v=1"></script>
+    <script src="app.js?v=3"></script>
   </body>
 </html>

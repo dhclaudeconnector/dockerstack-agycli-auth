@@ -64,13 +64,29 @@ const log = {
 let activeSessionId = null;
 const queue = [];
 
-function acquireMutex(sessionId) {
+/**
+ * Xin giữ container để chạy 1 phiên login.
+ * Trả về true khi được giữ, false khi hết timeout hoặc bị force-reset hủy.
+ * Timeout chống treo vô hạn: trước đây waiter không timeout nên tab mới
+ * treo ở "Starting session…" tới 10 phút khi phiên cũ bị bỏ dở (reload tab,
+ * mất sessionId) mà vẫn giữ mutex.
+ */
+function acquireMutex(sessionId, { timeoutMs = 0 } = {}) {
   if (!activeSessionId) {
     activeSessionId = sessionId;
-    return Promise.resolve();
+    return Promise.resolve(true);
   }
   return new Promise((resolve) => {
-    queue.push({ sessionId, resolve });
+    const waiter = { sessionId, resolve, timer: null };
+    if (timeoutMs > 0) {
+      waiter.timer = setTimeout(() => {
+        const idx = queue.indexOf(waiter);
+        if (idx >= 0) queue.splice(idx, 1);
+        resolve(false);
+      }, timeoutMs);
+      if (waiter.timer.unref) waiter.timer.unref();
+    }
+    queue.push(waiter);
   });
 }
 
@@ -79,9 +95,28 @@ function releaseMutex(sessionId) {
   activeSessionId = null;
   const next = queue.shift();
   if (next) {
+    if (next.timer) clearTimeout(next.timer);
     activeSessionId = next.sessionId;
-    next.resolve();
+    next.resolve(true);
   }
+}
+
+/**
+ * Dọn sạch mutex: dùng cho "Hủy / Làm lại từ đầu" khi phiên cũ bị kẹt
+ * (user reload tab, bỏ qua URL, cancel giữa chừng). Mọi waiter đang chờ
+ * được resolve(false) để /start trả 409 busy thay vì treo.
+ */
+function resetMutex() {
+  activeSessionId = null;
+  const pending = queue.splice(0, queue.length);
+  for (const waiter of pending) {
+    if (waiter.timer) clearTimeout(waiter.timer);
+    waiter.resolve(false);
+  }
+}
+
+function getMutexState() {
+  return { holder: activeSessionId, queued: queue.length };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -776,6 +811,23 @@ async function resetCredential(containerName, credentialPath = CONFIG.credential
   }
 }
 
+/**
+ * Kill các driver agy_oauth_flow.py còn sót trong container (phiên cũ bị
+ * bỏ dở: reload tab, cancel giữa chừng). Best-effort — container không có
+ * pkill hoặc không còn process nào thì bỏ qua.
+ */
+async function killStrayAgy(containerName = CONFIG.containerName) {
+  try {
+    await execDocker(
+      ["exec", containerName, "sh", "-lc", "pkill -f agy_oauth_flow.py 2>/dev/null; true"],
+      { timeoutMs: 8000 },
+    );
+    log.ok("killStrayAgy: cleaned stray agy_oauth_flow.py processes (if any).");
+  } catch (err) {
+    log.warn(`killStrayAgy failed: ${err.message}`);
+  }
+}
+
 // ─── Spawn agy session ────────────────────────────────────────────────────────
 
 /**
@@ -877,5 +929,8 @@ module.exports = {
   streamChangedFilesArchive,
   acquireMutex,
   releaseMutex,
+  resetMutex,
+  getMutexState,
+  killStrayAgy,
   getCodeFilePath,
 };
