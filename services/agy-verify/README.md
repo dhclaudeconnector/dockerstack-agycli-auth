@@ -114,7 +114,9 @@ lần** và **gắn với đúng URL của lần chạy đó**:
 | File | Nội dung |
 |------|----------|
 | `oauth-url.txt` | URL #1 nguyên bản |
+| `oauth-qr.png` | QR của URL #1 để quét bằng điện thoại (cần `pip install "qrcode[pil]"` hoặc `segno`, nếu thiếu chỉ in URL + gợi ý quét QR trên Web UI) |
 | `verify-url.txt` | URL #2 nguyên bản (nếu có) |
+| `verify-qr.png` | QR của URL #2 để quét bằng điện thoại (điều kiện như trên) |
 | `antigravity-oauth-token` | token sau login (nếu có) — **credential nhạy cảm** |
 | `urls.txt` | mọi URL bắt được, de-dup giữ thứ tự |
 | `agy-output.raw` / `agy-output.txt` | output PTY (raw / đã strip ANSI) |

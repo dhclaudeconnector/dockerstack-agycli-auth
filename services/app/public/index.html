@@ -142,6 +142,17 @@
                 <a id="auth-url-link" href="#" target="_blank" rel="noopener">—</a>
               </div>
 
+              <div class="qr-wrap hidden" id="auth-qr-wrap">
+                <div class="label-caps mb-4">QR Auth URL — quét bằng điện thoại</div>
+                <div class="qr-box">
+                  <div id="auth-qr-code" class="qr-code" title="QR của Auth URL"></div>
+                  <div class="qr-actions">
+                    <button class="btn-light" id="btn-copy-auth-url" type="button">Copy URL</button>
+                    <button class="btn-light" id="btn-download-auth-qr" type="button">Tải QR</button>
+                  </div>
+                </div>
+              </div>
+
               <div class="flex gap-3 mt-4">
                 <button class="btn-primary" id="btn-open-url">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -196,6 +207,16 @@
                   <div class="label-caps mb-4">Verification URL #2</div>
                   <div class="auth-url-box">
                     <a id="verify-url-link" href="#" target="_blank" rel="noopener">—</a>
+                  </div>
+                  <div class="qr-wrap hidden" id="verify-qr-wrap">
+                    <div class="label-caps mb-4">QR Verify URL — quét bằng điện thoại</div>
+                    <div class="qr-box">
+                      <div id="verify-qr-code" class="qr-code" title="QR của Verify URL"></div>
+                      <div class="qr-actions">
+                        <button class="btn-light" id="btn-copy-verify-url" type="button">Copy URL</button>
+                        <button class="btn-light" id="btn-download-verify-qr" type="button">Tải QR</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -445,6 +466,7 @@
     <!-- Toast container -->
     <div class="toast-container" id="toast-container"></div>
 
+    <script src="qrcode.min.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

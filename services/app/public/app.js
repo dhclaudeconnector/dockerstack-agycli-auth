@@ -42,6 +42,14 @@ const dom = {
   errorCode: $("error-code"),
   authUrlLink: $("auth-url-link"),
   authUrlBox: $("auth-url-box"),
+  authQrWrap: $("auth-qr-wrap"),
+  authQrCode: $("auth-qr-code"),
+  btnCopyAuthUrl: $("btn-copy-auth-url"),
+  btnDownloadAuthQr: $("btn-download-auth-qr"),
+  verifyQrWrap: $("verify-qr-wrap"),
+  verifyQrCode: $("verify-qr-code"),
+  btnCopyVerifyUrl: $("btn-copy-verify-url"),
+  btnDownloadVerifyQr: $("btn-download-verify-qr"),
   authBadge: $("auth-badge"),
   sessionBadge: $("session-badge"),
   spinnerCode: $("spinner-code"),
@@ -196,6 +204,80 @@ async function copyText(text, label) {
     textarea.remove();
   }
   toast(`${label} copied`, "success");
+}
+
+// ─── QR codes for Auth URL + Verify URL ─────────────────────────────────────
+// Dùng qrcodejs vendored (public/qrcode.min.js) để render offline.
+// Fallback sang api.qrserver.com nếu lib chưa load (VD cache cũ).
+
+function renderQrCode(container, url, size = 180) {
+  if (!container) return;
+  container.innerHTML = "";
+  const value = String(url || "").trim();
+  if (!value) return;
+  try {
+    if (typeof QRCode !== "undefined") {
+      // CorrectLevel L để chứa được URL Google dài (~500-1000 ký tự).
+      new QRCode(container, {
+        text: value,
+        width: size,
+        height: size,
+        correctLevel: QRCode.CorrectLevel.L,
+      });
+      return;
+    }
+  } catch (err) {
+    console.warn("[QR] qrcodejs failed, using fallback image:", err);
+    container.innerHTML = "";
+  }
+  const img = document.createElement("img");
+  img.alt = "QR code";
+  img.width = size;
+  img.height = size;
+  img.loading = "lazy";
+  img.src = "https://api.qrserver.com/v1/create-qr-code/?size=" + size + "x" + size + "&data=" + encodeURIComponent(value);
+  container.appendChild(img);
+}
+
+function clearQrCode(container) {
+  if (container) container.innerHTML = "";
+}
+
+function downloadQrCode(container, filename) {
+  if (!container) return;
+  const img = container.querySelector("img");
+  const canvas = container.querySelector("canvas");
+  const name = filename || "qr.png";
+  const triggerDownload = (href) => {
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+  try {
+    if (canvas) {
+      triggerDownload(canvas.toDataURL("image/png"));
+      toast("QR downloaded", "success");
+      return;
+    }
+    if (img && img.src) {
+      if (img.src.startsWith("data:")) {
+        triggerDownload(img.src);
+        toast("QR downloaded", "success");
+        return;
+      }
+      // Ảnh cross-origin (fallback api.qrserver) — mở tab mới để user lưu.
+      window.open(img.src, "_blank", "noopener");
+      toast("Opened QR image in new tab — right-click to save", "info");
+      return;
+    }
+  } catch (err) {
+    toast("Download QR failed: " + err.message, "danger");
+    return;
+  }
+  toast("No QR to download yet", "warning");
 }
 
 function setSidebarStatus(text) {
@@ -483,8 +565,10 @@ function onAuthUrl(url) {
   showScreen(2);
   dom.authUrlLink.href = url;
   dom.authUrlLink.textContent = url;
+  if (dom.authQrWrap) dom.authQrWrap.classList.remove("hidden");
+  if (dom.authQrCode) renderQrCode(dom.authQrCode, url, 180);
   setBadge(dom.authBadge, "Waiting for code", "warning");
-  toast("Auth URL received — open it in your browser", "info");
+  toast("Auth URL received — open it in your browser or scan QR", "info");
   setSidebarStatus("Auth URL ready");
 }
 
@@ -509,9 +593,11 @@ function onVerifyUrl(url) {
   dom.checkVerificationLabel.textContent = "I verified — Check Again";
   dom.eligibilityTitle.textContent = "AGY requires account verification.";
   dom.eligibilityDescription.textContent = "This is the official verification URL printed by AGY. Open it now, complete Google verification, then return here and check again.";
+  if (dom.verifyQrWrap) dom.verifyQrWrap.classList.remove("hidden");
+  if (dom.verifyQrCode) renderQrCode(dom.verifyQrCode, url, 180);
   setBadge(dom.authBadge, "Verification required", "warning");
-  dom.eligibilityMessage.textContent = "Complete Google verification using URL #2, then click ‘I verified — Check Again’.";
-  toast("AGY requires account verification — URL #2 is ready", "warning");
+  dom.eligibilityMessage.textContent = "Complete Google verification using URL #2 (link or QR), then click ‘I verified — Check Again’.";
+  toast("AGY requires account verification — URL #2 + QR is ready", "warning");
   setSidebarStatus("Verification required");
 }
 
@@ -760,6 +846,12 @@ function resetUI(options = {}) {
   dom.btnOpenVerifyUrl.classList.remove("hidden");
   dom.verifyUrlLink.href = "#";
   dom.verifyUrlLink.textContent = "—";
+  dom.authUrlLink.href = "#";
+  dom.authUrlLink.textContent = "—";
+  if (dom.authQrWrap) dom.authQrWrap.classList.add("hidden");
+  if (dom.verifyQrWrap) dom.verifyQrWrap.classList.add("hidden");
+  clearQrCode(dom.authQrCode);
+  clearQrCode(dom.verifyQrCode);
   dom.btnCheckVerification.disabled = false;
   dom.checkVerificationLabel.textContent = "I verified — Check Again";
   dom.eligibilityTitle.textContent = "AGY requires account verification.";
@@ -959,6 +1051,20 @@ dom.btnOpenUrl.addEventListener("click", () => {
 });
 dom.btnOpenVerifyUrl.addEventListener("click", () => {
   if (state.verifyUrl) window.open(state.verifyUrl, "_blank", "noopener");
+});
+if (dom.btnCopyAuthUrl) dom.btnCopyAuthUrl.addEventListener("click", () => {
+  if (state.authUrl) copyText(state.authUrl, "Auth URL");
+  else toast("No Auth URL yet", "warning");
+});
+if (dom.btnDownloadAuthQr) dom.btnDownloadAuthQr.addEventListener("click", () => {
+  downloadQrCode(dom.authQrCode, "agy-auth-url-qr.png");
+});
+if (dom.btnCopyVerifyUrl) dom.btnCopyVerifyUrl.addEventListener("click", () => {
+  if (state.verifyUrl) copyText(state.verifyUrl, "Verify URL");
+  else toast("No Verify URL yet", "warning");
+});
+if (dom.btnDownloadVerifyQr) dom.btnDownloadVerifyQr.addEventListener("click", () => {
+  downloadQrCode(dom.verifyQrCode, "agy-verify-url-qr.png");
 });
 dom.btnCheckVerification.addEventListener("click", apiCheckVerification);
 dom.btnLoginAnother.addEventListener("click", resetUI);

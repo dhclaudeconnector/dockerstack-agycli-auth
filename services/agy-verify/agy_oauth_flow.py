@@ -94,6 +94,53 @@ def collect_urls(blob: bytes) -> list:
     return out
 
 
+def show_url_with_qr(label: str, url_bytes: bytes, outdir: str = None, qr_name: str = None) -> None:
+    """In URL + QR ASCII ra terminal, đồng thời lưu PNG nếu có lib.
+
+    Không bắt buộc cài thêm lib: nếu thiếu `qrcode`/`segno` thì chỉ in URL
+    và gợi ý quét QR trên Web UI (nơi luôn render QR cho cả 2 URL).
+    """
+    text = url_bytes.decode("utf-8", "replace") if isinstance(url_bytes, (bytes, bytearray)) else str(url_bytes)
+    sys.stdout.write("\n%s:\n%s\n\n" % (label, text))
+    sys.stdout.flush()
+    png_saved = False
+    try:
+        import qrcode  # pip install "qrcode[pil]"
+        qr = qrcode.QRCode(border=1)
+        qr.add_data(text)
+        qr.make(fit=True)
+        qr.print_ascii(invert=True)
+        sys.stdout.flush()
+        if outdir and qr_name:
+            try:
+                os.makedirs(outdir, exist_ok=True)
+                qr.make_image().save(os.path.join(outdir, qr_name))
+                png_saved = True
+            except Exception as e:
+                sys.stdout.write("[QR] Không lưu được PNG %s: %s\n" % (qr_name, e))
+    except ImportError:
+        try:
+            import segno  # pip install segno (nhẹ, không cần Pillow để lưu PNG)
+            q = segno.make(text, error="l")
+            q.terminal(compact=True)
+            sys.stdout.flush()
+            if outdir and qr_name:
+                try:
+                    os.makedirs(outdir, exist_ok=True)
+                    q.save(os.path.join(outdir, qr_name), scale=6)
+                    png_saved = True
+                except Exception as e:
+                    sys.stdout.write("[QR] Không lưu được PNG %s: %s\n" % (qr_name, e))
+        except ImportError:
+            sys.stdout.write("[QR] Quét QR trên Web UI (auto hiện QR cho cả 2 URL).\n"
+                             "     Muốn hiện QR ở terminal: pip install \"qrcode[pil]\" hoặc segno.\n")
+    except Exception as e:
+        sys.stdout.write("[QR] Không tạo được QR: %s\n" % e)
+    if png_saved and outdir and qr_name:
+        sys.stdout.write("[QR] Đã lưu %s/%s\n" % (outdir, qr_name))
+    sys.stdout.flush()
+
+
 def seed_home(home: str, cwd: str) -> None:
     base = os.path.join(home, ".gemini", "antigravity-cli")
     cache = os.path.join(base, "cache")
@@ -248,14 +295,12 @@ def main():
                 if oauth_url is None and b"accounts.google.com/o/oauth2/auth" in u:
                     oauth_url = u
                     note("OAuth authorization URL captured.")
-                    sys.stdout.write("\nOAuth URL:\n%s\n\n" % oauth_url.decode("utf-8", "replace"))
-                    sys.stdout.flush()
+                    show_url_with_qr("OAuth URL", oauth_url, args.outdir, "oauth-qr.png")
                 if verify_url is None and b"accounts.google.com/signin/continue" in u:
                     verify_url = u
                     verify_seen = True
                     note("Verification URL captured from output.")
-                    sys.stdout.write("\nVerify URL:\n%s\n\n" % verify_url.decode("utf-8", "replace"))
-                    sys.stdout.flush()
+                    show_url_with_qr("Verify URL", verify_url, args.outdir, "verify-qr.png")
 
         # tail the log file - guaranteed source for the verification URL
         for u in collect_urls(log_tail()):
@@ -267,8 +312,7 @@ def main():
                 verify_url = u
                 verify_seen = True
                 note("Verification URL captured from log.")
-                sys.stdout.write("\nVerify URL:\n%s\n\n" % verify_url.decode("utf-8", "replace"))
-                sys.stdout.flush()
+                show_url_with_qr("Verify URL", verify_url, args.outdir, "verify-qr.png")
 
         txt = strip_ansi(bytes(raw))
         low = txt.lower()
@@ -337,6 +381,8 @@ def main():
     print("Artifacts written to: %s/" % args.outdir)
     print("OAuth URL: %s" % (oauth_url.decode("utf-8", "replace") if oauth_url else "NOT FOUND"))
     print("Verify URL: %s" % (verify_url.decode("utf-8", "replace") if verify_url else "NOT FOUND"))
+    print("QR PNG (nếu có lib qrcode/segno): %s/oauth-qr.png, %s/verify-qr.png" % (args.outdir, args.outdir))
+    print("Web UI cũng luôn hiện QR cho cả 2 URL để quét bằng điện thoại.")
     if error_seen:
         print("Error: %s" % error_seen)
     if oauth_url is None and not error_seen:
